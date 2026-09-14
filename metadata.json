@@ -1,0 +1,6 @@
+{
+  "name": "Estrattore Fatture CSV",
+  "description": "Analisi fatture di pagamento con esportazione CSV formato italiano conforme (DATA, DESCRIZIONE, USCITE, ENTRATE).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
