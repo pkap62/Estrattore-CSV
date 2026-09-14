@@ -539,7 +539,7 @@ export default function App() {
                     }}
                   >
                     <div className="flex items-center justify-end gap-1.5">
-                      <span>USCITE (&euro;)</span>
+                      <span>USCITE</span>
                       {invoices.length > 0 && <ArrowUpDown className="w-3 h-3 text-slate-400" />}
                     </div>
                   </th>
