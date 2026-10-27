@@ -9,7 +9,9 @@ export interface InvoiceRecord {
   pde?: string;
   podOrPdr?: string;
   period?: string;
-  amount: number; // in euro
+  amount: number; // in euro (importo effettivo a bilancio / CSV)
+  originalAmount?: number; // importo totale originario del documento
+  splitRatio?: number; // 1 = 100%, 0.5 = 50% metà spesa
   recipient?: string;
   consumption?: string;
   fileName?: string;

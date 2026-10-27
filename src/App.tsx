@@ -26,6 +26,8 @@ import {
   Save,
   PlusCircle,
   AlertTriangle,
+  Percent,
+  Sparkles,
 } from 'lucide-react';
 import { INITIAL_INVOICES } from './data/invoices';
 import { InvoiceRecord } from './types';
@@ -45,6 +47,7 @@ export default function App() {
   const [sortField, setSortField] = useState<'dueDate' | 'amount' | 'invoiceNumber'>('dueDate');
   const [sortAsc, setSortAsc] = useState(true);
   const [descFormat, setDescFormat] = useState<DescriptionFormat>('standard');
+  const [includeSplitNoteInCsv, setIncludeSplitNoteInCsv] = useState(true);
   const [showRawCsv, setShowRawCsv] = useState(false);
   const [showResetAllModal, setShowResetAllModal] = useState(false);
   const [resetTrigger, setResetTrigger] = useState(0);
@@ -142,8 +145,79 @@ export default function App() {
 
   // The generated CSV content based on current invoices and description setting
   const csvContent = useMemo(() => {
-    return generateCsvString(invoices, descFormat);
-  }, [invoices, descFormat]);
+    return generateCsvString(invoices, descFormat, includeSplitNoteInCsv);
+  }, [invoices, descFormat, includeSplitNoteInCsv]);
+
+  // Energentium invoices tracking
+  const energentiumInvoices = useMemo(() => {
+    return invoices.filter((inv) => (inv.supplier || '').toLowerCase().includes('energentium'));
+  }, [invoices]);
+
+  const allEnergentiumHalved = useMemo(() => {
+    return (
+      energentiumInvoices.length > 0 &&
+      energentiumInvoices.every((inv) => inv.splitRatio === 0.5)
+    );
+  }, [energentiumInvoices]);
+
+  // Toggle single invoice between 100% and 50%
+  const handleToggleSplit = (invoiceId: string) => {
+    setInvoices((prev) =>
+      prev.map((inv) => {
+        if (inv.id !== invoiceId) return inv;
+        const isCurrentlyHalf = inv.splitRatio === 0.5;
+        if (isCurrentlyHalf) {
+          // Switch back to 100% (intero)
+          const fullAmount =
+            inv.originalAmount && inv.originalAmount > 0
+              ? inv.originalAmount
+              : Math.round(inv.amount * 2 * 100) / 100;
+          return {
+            ...inv,
+            splitRatio: 1.0,
+            amount: fullAmount,
+            originalAmount: fullAmount,
+          };
+        } else {
+          // Switch to 50% (metà spesa)
+          const fullAmount =
+            inv.originalAmount && inv.originalAmount > 0 ? inv.originalAmount : inv.amount;
+          const halfAmount = Math.round(fullAmount * 0.5 * 100) / 100;
+          return {
+            ...inv,
+            splitRatio: 0.5,
+            amount: halfAmount,
+            originalAmount: fullAmount,
+          };
+        }
+      })
+    );
+  };
+
+  // Batch toggle all Energentium invoices
+  const handleApplyEnergentiumSplit = (forceRatio?: number) => {
+    setInvoices((prev) =>
+      prev.map((inv) => {
+        if (!(inv.supplier || '').toLowerCase().includes('energentium')) return inv;
+        const targetRatio =
+          forceRatio !== undefined ? forceRatio : allEnergentiumHalved ? 1.0 : 0.5;
+        const fullAmount =
+          inv.originalAmount && inv.originalAmount > 0
+            ? inv.originalAmount
+            : inv.splitRatio === 0.5
+            ? Math.round(inv.amount * 2 * 100) / 100
+            : inv.amount;
+        const newAmount =
+          targetRatio === 0.5 ? Math.round(fullAmount * 0.5 * 100) / 100 : fullAmount;
+        return {
+          ...inv,
+          splitRatio: targetRatio,
+          amount: newAmount,
+          originalAmount: fullAmount,
+        };
+      })
+    );
+  };
 
   const handleDownloadCsv = () => {
     if (invoices.length === 0) return;
@@ -451,11 +525,43 @@ export default function App() {
                   <option value="compact">Compatta</option>
                 </select>
               </div>
+
+              {/* Include Split Note in CSV Toggle */}
+              <label className="flex items-center gap-1.5 text-xs text-slate-700 bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-lg cursor-pointer hover:bg-slate-100 transition-colors select-none">
+                <input
+                  type="checkbox"
+                  checked={includeSplitNoteInCsv}
+                  onChange={(e) => setIncludeSplitNoteInCsv(e.target.checked)}
+                  className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                />
+                <span>Quota 50% descritta nel CSV</span>
+              </label>
+
+              {/* Batch Energentium 50% Button */}
+              {energentiumInvoices.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => handleApplyEnergentiumSplit()}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer shadow-2xs flex items-center gap-1.5 ${
+                    allEnergentiumHalved
+                      ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
+                      : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                  }`}
+                  title="Applica o rimuovi la quota al 50% (metà importo) su tutte le fatture Energentium"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                  <span>
+                    {allEnergentiumHalved
+                      ? `Energentium al 50% attivo (${energentiumInvoices.length})`
+                      : `Applica 50% a Energentium (${energentiumInvoices.length})`}
+                  </span>
+                </button>
+              )}
             </div>
           </div>
         )}
 
-        {/* Quadro di Avviso: Controllo Esattezza Importi ed Editing */}
+        {/* Quadro di Avviso: Controllo Esattezza Importi, Ripartizione 50% ed Editing */}
         <div
           id="quadro-avviso-controllo-importi"
           className="bg-amber-50/90 border border-amber-300/80 rounded-xl p-4 shadow-2xs text-amber-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
@@ -467,20 +573,22 @@ export default function App() {
             <div className="space-y-0.5">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-bold text-amber-950">
-                  Controllo di Esattezza degli Importi
+                  Controllo di Esattezza degli Importi &amp; Ripartizione Spese (50%)
                 </h3>
                 <span className="text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900 border border-amber-300">
                   Avviso
                 </span>
               </div>
               <p className="text-xs sm:text-sm text-amber-900 leading-relaxed">
-                Controllare l&apos;esattezza degli importi riportati, in caso di errore correggere cliccando nella colonna <strong className="font-bold underline decoration-amber-500 decoration-2 underline-offset-2">AZIONI</strong> (pulsante <span className="inline-flex items-center gap-1 font-semibold text-indigo-900 bg-white/90 border border-indigo-200 px-1.5 py-0.5 rounded text-xs font-mono shadow-2xs"><Edit2 className="w-3 h-3 text-indigo-600" /> Modifica</span>).
+                Controllare l&apos;esattezza degli importi riportati. Per le fatture della società <strong>Energentium</strong> (o altre spese condivise), l&apos;importo a bilancio CSV viene dimezzato al <strong>50%</strong>. Puoi alternare tra 100% e 50% con un singolo clic nella colonna <strong className="font-bold underline decoration-amber-500 decoration-2 underline-offset-2">QUOTA</strong> o correggere importi e dati cliccando nella colonna <strong className="font-bold underline decoration-amber-500 decoration-2 underline-offset-2">AZIONI</strong>.
               </p>
             </div>
           </div>
-          <div className="self-start sm:self-center shrink-0 text-xs font-medium text-amber-800 bg-amber-100/70 border border-amber-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
-            <Edit2 className="w-3.5 h-3.5 text-amber-700" />
-            <span>Rettifica importi e date con un clic</span>
+          <div className="self-start sm:self-center shrink-0 flex items-center gap-2">
+            <span className="text-xs font-medium text-amber-800 bg-amber-100/70 border border-amber-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+              <Percent className="w-3.5 h-3.5 text-amber-700" />
+              <span>Dimezzamento 50% con 1 clic</span>
+            </span>
           </div>
         </div>
 
@@ -544,6 +652,7 @@ export default function App() {
                     </div>
                   </th>
                   <th className="py-3.5 px-4 text-center">ENTRATE</th>
+                  <th className="py-3.5 px-4 text-center">QUOTA</th>
                   <th className="py-3.5 px-4 text-center">SERVIZIO</th>
                   <th className="py-3.5 px-4">FORNITORE & RIFERIMENTI</th>
                   <th className="py-3.5 px-4 text-right">AZIONI</th>
@@ -552,7 +661,7 @@ export default function App() {
               <tbody className="divide-y divide-slate-200">
                 {filteredInvoices.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-500 text-sm">
+                    <td colSpan={8} className="py-12 text-center text-slate-500 text-sm">
                       <div className="flex flex-col items-center justify-center max-w-md mx-auto">
                         <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mb-3">
                           <FileSpreadsheet className="w-6 h-6" />
@@ -592,7 +701,7 @@ export default function App() {
                         {/* DESCRIZIONE */}
                         <td className="py-3 px-4 text-slate-800 max-w-md">
                           <div className="font-medium text-xs sm:text-sm">
-                            {formatInvoiceDescription(inv, descFormat)}
+                            {formatInvoiceDescription(inv, descFormat, includeSplitNoteInCsv)}
                           </div>
                           <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5 flex-wrap">
                             {inv.invoiceDate && <span>Emessa: {inv.invoiceDate}</span>}
@@ -607,13 +716,60 @@ export default function App() {
                         </td>
 
                         {/* USCITE */}
-                        <td className="py-3 px-4 text-right font-mono font-bold text-rose-700 whitespace-nowrap">
-                          {!inv.isIncoming ? `${formatItalianDecimal(inv.amount)} €` : '-'}
+                        <td className="py-3 px-4 text-right font-mono font-bold whitespace-nowrap">
+                          {!inv.isIncoming ? (
+                            <div>
+                              <span className="text-rose-700 text-sm">
+                                {formatItalianDecimal(inv.amount)} &euro;
+                              </span>
+                              {inv.splitRatio === 0.5 && (
+                                <div className="text-[11px] font-normal text-amber-700 font-sans">
+                                  Tot. {formatItalianDecimal(inv.originalAmount || inv.amount * 2)} &euro;
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-300">-</span>
+                          )}
                         </td>
 
                         {/* ENTRATE */}
-                        <td className="py-3 px-4 text-center font-mono font-bold text-emerald-700 whitespace-nowrap">
-                          {inv.isIncoming ? `${formatItalianDecimal(inv.amount)} €` : '-'}
+                        <td className="py-3 px-4 text-center font-mono font-bold whitespace-nowrap">
+                          {inv.isIncoming ? (
+                            <div>
+                              <span className="text-emerald-700 text-sm">
+                                {formatItalianDecimal(inv.amount)} &euro;
+                              </span>
+                              {inv.splitRatio === 0.5 && (
+                                <div className="text-[11px] font-normal text-amber-700 font-sans">
+                                  Tot. {formatItalianDecimal(inv.originalAmount || inv.amount * 2)} &euro;
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-300">-</span>
+                          )}
+                        </td>
+
+                        {/* QUOTA */}
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSplit(inv.id)}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer shadow-2xs border ${
+                              inv.splitRatio === 0.5
+                                ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
+                                : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200 hover:text-slate-900'
+                            }`}
+                            title={
+                              inv.splitRatio === 0.5
+                                ? 'Quota 50% attiva (metà importo a bilancio). Fai clic per riportare all\'importo intero (100%)'
+                                : 'Quota 100% intera. Fai clic per dimezzare l\'importo al 50%'
+                            }
+                          >
+                            <Percent className="w-3 h-3 text-amber-600" />
+                            <span>{inv.splitRatio === 0.5 ? '50% (Metà)' : '100% (Intero)'}</span>
+                          </button>
                         </td>
 
                         {/* SERVIZIO */}
@@ -700,7 +856,7 @@ export default function App() {
                         )} €`
                       : '-'}
                   </td>
-                  <td className="py-3 px-4" colSpan={3}></td>
+                  <td className="py-3 px-4" colSpan={4}></td>
                 </tr>
               </tfoot>
             </table>
@@ -761,6 +917,75 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Ripartizione Quota Spesa (100% vs 50%) */}
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-700 flex items-center gap-1">
+                      <Percent className="w-3.5 h-3.5 text-indigo-600" />
+                      Ripartizione Quota Spesa
+                    </span>
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      Totale lordo doc: &euro;{' '}
+                      {formatItalianDecimal(
+                        editingInvoice.originalAmount && editingInvoice.originalAmount > 0
+                          ? editingInvoice.originalAmount
+                          : editingInvoice.splitRatio === 0.5
+                          ? Math.round(editingInvoice.amount * 2 * 100) / 100
+                          : editingInvoice.amount
+                      )}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const orig =
+                          editingInvoice.originalAmount && editingInvoice.originalAmount > 0
+                            ? editingInvoice.originalAmount
+                            : editingInvoice.splitRatio === 0.5
+                            ? Math.round(editingInvoice.amount * 2 * 100) / 100
+                            : editingInvoice.amount;
+                        setEditingInvoice({
+                          ...editingInvoice,
+                          splitRatio: 1.0,
+                          amount: orig,
+                          originalAmount: orig,
+                        });
+                      }}
+                      className={`py-1.5 px-3 text-xs rounded-lg border font-medium cursor-pointer transition-colors ${
+                        editingInvoice.splitRatio !== 0.5
+                          ? 'bg-slate-800 border-slate-900 text-white font-semibold shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      100% (Intero)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const orig =
+                          editingInvoice.originalAmount && editingInvoice.originalAmount > 0
+                            ? editingInvoice.originalAmount
+                            : editingInvoice.amount;
+                        const half = Math.round(orig * 0.5 * 100) / 100;
+                        setEditingInvoice({
+                          ...editingInvoice,
+                          splitRatio: 0.5,
+                          amount: half,
+                          originalAmount: orig,
+                        });
+                      }}
+                      className={`py-1.5 px-3 text-xs rounded-lg border font-medium cursor-pointer transition-colors ${
+                        editingInvoice.splitRatio === 0.5
+                          ? 'bg-amber-600 border-amber-700 text-white font-semibold shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      50% (Metà Spesa)
+                    </button>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -782,18 +1007,32 @@ export default function App() {
                     <input
                       type="text"
                       value={editingInvoice.supplier}
-                      onChange={(e) =>
-                        setEditingInvoice({ ...editingInvoice, supplier: e.target.value })
-                      }
+                      onChange={(e) => {
+                        const newSupplier = e.target.value;
+                        let newService = editingInvoice.service;
+                        if (newSupplier.toLowerCase().includes('energentium')) {
+                          if (!newService || newService === 'Spesa Fornitura' || newService === 'Fornitura Generica' || !newService.toLowerCase().includes('gas')) {
+                            newService = 'Energia Elettrica';
+                          }
+                        }
+                        setEditingInvoice({ ...editingInvoice, supplier: newSupplier, service: newService });
+                      }}
                       className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Servizio
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Servizio
+                    </label>
+                    {editingInvoice.supplier?.toLowerCase().includes('energentium') && (
+                      <span className="text-[11px] text-amber-700 font-medium">
+                        Energentium: non-Gas = Energia Elettrica
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={editingInvoice.service}
@@ -802,6 +1041,22 @@ export default function App() {
                     }
                     className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500"
                   />
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setEditingInvoice({ ...editingInvoice, service: 'Energia Elettrica' })}
+                      className="text-[11px] px-2 py-0.5 rounded bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer font-medium"
+                    >
+                      Energia Elettrica
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingInvoice({ ...editingInvoice, service: 'Gas Naturale' })}
+                      className="text-[11px] px-2 py-0.5 rounded bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 cursor-pointer font-medium"
+                    >
+                      Gas Naturale
+                    </button>
+                  </div>
                 </div>
 
                 <div>

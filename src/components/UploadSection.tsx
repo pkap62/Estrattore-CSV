@@ -12,8 +12,12 @@ import {
   Trash2,
   Ban,
   Layers,
+  Percent,
+  Sparkles,
 } from 'lucide-react';
 import { InvoiceRecord, UploadTask } from '../types';
+
+export type SplitExtractionMode = 'auto_energentium' | 'all_half' | 'all_full';
 
 interface UploadSectionProps {
   onInvoicesAdded: (newInvoices: InvoiceRecord[], mode: 'append' | 'replace') => void;
@@ -39,6 +43,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [completedResults, setCompletedResults] = useState<InvoiceRecord[]>([]);
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
+  const [splitMode, setSplitMode] = useState<SplitExtractionMode>('auto_energentium');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -173,24 +178,49 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
         if (json.success && (json.data || (json.items && json.items.length > 0))) {
           const rawItems: any[] = Array.isArray(json.items) && json.items.length > 0 ? json.items : [json.data];
           
-          const newInvoices: InvoiceRecord[] = rawItems.map((item, idx) => ({
-            id: item.id || `${Math.random().toString(36).substring(2, 9)}-${idx}`,
-            invoiceNumber: item.invoiceNumber || 'S.N.',
-            invoiceDate: item.invoiceDate || item.dueDate || '',
-            dueDate: item.dueDate,
-            supplier: item.supplier || 'Fornitore',
-            service: item.service || 'Spesa Fornitura',
-            period: item.period || '',
-            customerCode: item.customerCode || '',
-            pde: item.pde || '',
-            podOrPdr: item.podOrPdr || '',
-            amount: Number(item.amount) || 0,
-            recipient: item.recipient || 'Parrocchia Sacro Cuore al Romito',
-            consumption: item.consumption || '',
-            fileName: file.name,
-            isIncoming: Boolean(item.isIncoming),
-            source: json.source,
-          }));
+          const newInvoices: InvoiceRecord[] = rawItems.map((item, idx) => {
+            const supplier = item.supplier || 'Fornitore';
+            const rawAmount = Number(item.amount) || 0;
+            const supplierLower = supplier.toLowerCase();
+            const fileNameLower = file.name.toLowerCase();
+            const isEnergentium = supplierLower.includes('energentium') || fileNameLower.includes('energentium');
+
+            let service = item.service || 'Spesa Fornitura';
+            // Regola Energentium: le fatture di Energentium che non sono Gas sono Energia Elettrica
+            if (isEnergentium && !service.toLowerCase().includes('gas')) {
+              service = 'Energia Elettrica';
+            }
+
+            let ratio = 1.0;
+            if (splitMode === 'all_half') {
+              ratio = 0.5;
+            } else if (splitMode === 'auto_energentium' && isEnergentium) {
+              ratio = 0.5;
+            }
+
+            const effectiveAmount = ratio < 1.0 ? Math.round(rawAmount * ratio * 100) / 100 : rawAmount;
+
+            return {
+              id: item.id || `${Math.random().toString(36).substring(2, 9)}-${idx}`,
+              invoiceNumber: item.invoiceNumber || 'S.N.',
+              invoiceDate: item.invoiceDate || item.dueDate || '',
+              dueDate: item.dueDate,
+              supplier,
+              service,
+              period: item.period || '',
+              customerCode: item.customerCode || '',
+              pde: item.pde || '',
+              podOrPdr: item.podOrPdr || '',
+              amount: effectiveAmount,
+              originalAmount: rawAmount,
+              splitRatio: ratio,
+              recipient: item.recipient || 'Parrocchia Sacro Cuore al Romito',
+              consumption: item.consumption || '',
+              fileName: file.name,
+              isIncoming: Boolean(item.isIncoming),
+              source: json.source,
+            };
+          });
 
           results.push(...newInvoices);
 
@@ -343,6 +373,60 @@ export const UploadSection: React.FC<UploadSectionProps> = ({
             </button>
           </div>
         )}
+
+        {/* Ripartizione Quote / Spese condivise (es. Energentium) */}
+        <div className="mb-4 bg-slate-50/80 border border-slate-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
+          <div className="flex items-center gap-2 text-slate-800">
+            <div className="w-6 h-6 rounded-md bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+              <Percent className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <span className="font-semibold text-slate-900">Ripartizione Spese all&apos;Estrazione:</span>
+              <span className="text-slate-500 ml-1.5 hidden md:inline">
+                dimezza l&apos;importo lordo della fattura da esportare nel CSV
+              </span>
+            </div>
+          </div>
+          <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-white shadow-2xs self-start sm:self-auto flex-wrap">
+            <button
+              type="button"
+              onClick={() => setSplitMode('auto_energentium')}
+              className={`px-3 py-1.5 rounded-md font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                splitMode === 'auto_energentium'
+                  ? 'bg-indigo-600 text-white shadow-2xs font-semibold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+              title="Riconosce in automatico le fatture di Energentium e applica la quota 50% (metà importo), lasciando le altre al 100%"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>Auto: 50% Energentium</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSplitMode('all_half')}
+              className={`px-3 py-1.5 rounded-md font-medium transition-all cursor-pointer ${
+                splitMode === 'all_half'
+                  ? 'bg-amber-600 text-white shadow-2xs font-semibold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+              title="Dimezza al 50% tutte le fatture caricate in questa sessione"
+            >
+              <span>Tutte al 50%</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSplitMode('all_full')}
+              className={`px-3 py-1.5 rounded-md font-medium transition-all cursor-pointer ${
+                splitMode === 'all_full'
+                  ? 'bg-slate-800 text-white shadow-2xs font-semibold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+              title="Importo intero (100%) per tutte le fatture caricate"
+            >
+              <span>Tutte 100% (Intero)</span>
+            </button>
+          </div>
+        </div>
 
         {/* Drag & Drop Area */}
         <div

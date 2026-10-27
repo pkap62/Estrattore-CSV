@@ -2,16 +2,32 @@ import { InvoiceRecord } from '../types';
 
 export type DescriptionFormat = 'standard' | 'detailed' | 'compact';
 
-export function formatInvoiceDescription(inv: InvoiceRecord, format: DescriptionFormat = 'standard'): string {
+export function formatInvoiceDescription(
+  inv: InvoiceRecord,
+  format: DescriptionFormat = 'standard',
+  includeSplitNote: boolean = true
+): string {
+  let baseDesc = '';
   switch (format) {
     case 'detailed':
-      return `Fattura ${inv.supplier || 'Fornitore'} n. ${inv.invoiceNumber} del ${inv.invoiceDate || inv.dueDate} - ${inv.service || 'Servizio'}${inv.period ? ' (Periodo: ' + inv.period + ')' : ''}${inv.podOrPdr ? ' - POD/PDR: ' + inv.podOrPdr : ''}${inv.pde ? ' - PDE: ' + inv.pde : ''}`;
+      baseDesc = `Fattura ${inv.supplier || 'Fornitore'} n. ${inv.invoiceNumber} del ${inv.invoiceDate || inv.dueDate} - ${inv.service || 'Servizio'}${inv.period ? ' (Periodo: ' + inv.period + ')' : ''}${inv.podOrPdr ? ' - POD/PDR: ' + inv.podOrPdr : ''}${inv.pde ? ' - PDE: ' + inv.pde : ''}`;
+      break;
     case 'compact':
-      return `${inv.supplier || 'Fornitore'} - ${inv.service || 'Spesa'} - Fatt. ${inv.invoiceNumber}`;
+      baseDesc = `${inv.supplier || 'Fornitore'} - ${inv.service || 'Spesa'} - Fatt. ${inv.invoiceNumber}`;
+      break;
     case 'standard':
     default:
-      return `Fattura ${inv.supplier || 'Fornitore'} nr. ${inv.invoiceNumber} del ${inv.invoiceDate || inv.dueDate} - ${inv.service || 'Fornitura'}${inv.period ? ' (Periodo ' + inv.period + ')' : ''}`;
+      baseDesc = `Fattura ${inv.supplier || 'Fornitore'} nr. ${inv.invoiceNumber} del ${inv.invoiceDate || inv.dueDate} - ${inv.service || 'Fornitura'}${inv.period ? ' (Periodo ' + inv.period + ')' : ''}`;
+      break;
   }
+
+  if (includeSplitNote && inv.splitRatio && inv.splitRatio < 1) {
+    const pct = Math.round(inv.splitRatio * 100);
+    const orig = inv.originalAmount ? ` - Tot. doc. € ${formatItalianDecimal(inv.originalAmount)}` : '';
+    baseDesc += ` (Quota ${pct}%${orig})`;
+  }
+
+  return baseDesc;
 }
 
 export function formatItalianDecimal(value: number): string {
@@ -20,13 +36,14 @@ export function formatItalianDecimal(value: number): string {
 
 export function generateCsvString(
   invoices: InvoiceRecord[],
-  descriptionFormat: DescriptionFormat = 'standard'
+  descriptionFormat: DescriptionFormat = 'standard',
+  includeSplitNote: boolean = true
 ): string {
   const header = `"DATA";"DESCRIZIONE";"USCITE";"ENTRATE"`;
 
   const rows = invoices.map((inv) => {
     const dataField = `"${inv.dueDate}"`;
-    const descField = `"${formatInvoiceDescription(inv, descriptionFormat).replace(/"/g, '""')}"`;
+    const descField = `"${formatInvoiceDescription(inv, descriptionFormat, includeSplitNote).replace(/"/g, '""')}"`;
     const usciteField = inv.isIncoming ? `""` : `"${formatItalianDecimal(inv.amount)}"`;
     const entrateField = inv.isIncoming ? `"${formatItalianDecimal(inv.amount)}"` : `""`;
     return `${dataField};${descField};${usciteField};${entrateField}`;

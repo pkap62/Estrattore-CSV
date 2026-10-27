@@ -124,6 +124,15 @@ export function extractXmlFromP7mBuffer(buffer: Buffer): string | null {
 export function categorizeService(combinedText: string, supplier: string): string {
   const t = (combinedText + ' ' + supplier).toLowerCase();
 
+  // Gas detection keywords
+  const isGas = /gas\s*naturale|gas\s*metano|\bsmc\b|\bpdr\b|distribuzione\s*gas|riscaldamento|\bgas\b/i.test(t);
+
+  // Energentium rule: le fatture di Energentium che non sono Gas sono Energia Elettrica
+  const isEnergentium = t.includes('energentium');
+  if (isEnergentium) {
+    return isGas ? 'Gas Naturale' : 'Energia Elettrica';
+  }
+
   // Electricity
   if (
     /luce|energia\s*elettrica|\bkwh\b|f1\s*\/|potenza\s*impegnata|\bpod\b|servizio\s*elettrico\s*nazionale|enel\s*energia.*luce/i.test(t) &&
@@ -133,16 +142,13 @@ export function categorizeService(combinedText: string, supplier: string): strin
   }
 
   // Gas
-  if (/gas\s*naturale|gas\s*metano|\bsmc\b|\bpdr\b|distribuzione\s*gas|riscaldamento/i.test(t)) {
+  if (isGas) {
     return 'Gas Naturale';
   }
 
   // Dual fuel check (if contains both, prioritize electricity or gas depending on counts)
   if (/luce|energia\s*elettrica|\bkwh\b/i.test(t)) {
     return 'Energia Elettrica';
-  }
-  if (/\bgas\b/i.test(t)) {
-    return 'Gas Naturale';
   }
 
   // Telecom / Internet

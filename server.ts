@@ -138,6 +138,14 @@ function extractFromTextOrXml(text: string, fileName: string) {
     service = 'TARI / Rifiuti';
   }
 
+  // Energentium rule: le fatture di Energentium che non sono Gas sono Energia Elettrica
+  const isEnergentiumDoc = /energentium/i.test(supplier) || /energentium/i.test(fileName) || /energentium/i.test(text);
+  if (isEnergentiumDoc) {
+    if (!supplier || supplier === 'Fornitore') supplier = 'Energentium';
+    const isGas = /gas|metano|\bsmc\b|\bpdr\b/i.test(service) || /gas\s*naturale|gas\s*metano|\bsmc\b|\bpdr\b|distribuzione\s*gas/i.test(text);
+    service = isGas ? 'Gas Naturale' : 'Energia Elettrica';
+  }
+
   // Invoice Number
   if (!invoiceNumber) {
     const numRegex = /(?:fattura|documento|avviso|doc\.?)\s*(?:n[r°\.]?|numero|num\.?)\s*[:\.]?\s*([A-Za-z0-9\/\-_]{2,20})/i;
@@ -455,6 +463,15 @@ async function startServer() {
 
         if (responseText) {
           const parsed = JSON.parse(responseText);
+          const finalSupplier = parsed.supplier || localResult.data.supplier || 'Fornitore';
+          let finalService = parsed.service || localResult.data.service || 'Spesa Fornitura';
+
+          if (/energentium/i.test(finalSupplier) || /energentium/i.test(fileName)) {
+            if (!/gas/i.test(finalService)) {
+              finalService = 'Energia Elettrica';
+            }
+          }
+
           return res.json({
             success: true,
             source: 'gemini',
@@ -463,6 +480,8 @@ async function startServer() {
               fileName,
               ...localResult.data,
               ...parsed,
+              supplier: finalSupplier,
+              service: finalService,
               // Ensure due date and amount are strictly retained
               dueDate: parsed.dueDate || localResult.data.dueDate,
               amount: typeof parsed.amount === 'number' ? parsed.amount : localResult.data.amount,
